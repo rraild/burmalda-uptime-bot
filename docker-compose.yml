@@ -1,0 +1,12 @@
+services:
+  vpn-monitor-bot:
+    build: .
+    container_name: vpn-monitor-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      STATE_DIR: /app/data
+    volumes:
+      - ./data:/app/data
+    image: ${VPN_MONITOR_IMAGE:-vpn-monitor-bot-vpn-monitor-bot}

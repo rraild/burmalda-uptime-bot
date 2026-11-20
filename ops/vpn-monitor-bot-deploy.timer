@@ -1,0 +1,10 @@
+[Unit]
+Description=Check GitHub for a tested VPN Monitor Bot revision
+
+[Timer]
+OnBootSec=1min
+OnUnitInactiveSec=1min
+Unit=vpn-monitor-bot-deploy.service
+
+[Install]
+WantedBy=timers.target
