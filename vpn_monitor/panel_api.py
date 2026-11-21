@@ -7,6 +7,7 @@ import aiohttp
 
 from .panel_models import (
     ClientDetails,
+    ClientListItem,
     ClientPage,
     HistorySample,
     HwidDevice,
@@ -143,6 +144,33 @@ class PanelApiClient:
             upload_bytes=sum(item.traffic.up for item in items),
             download_bytes=sum(item.traffic.down for item in items),
         )
+
+    async def get_expiring_clients(
+        self, start_ms: int, end_ms: int
+    ) -> list[ClientListItem]:
+        # The panel splits group filters on commas. Match the group in Python.
+        page_number = 1
+        clients: list[ClientListItem] = []
+        while True:
+            payload = await self._request(
+                "GET",
+                "clients/list/paged",
+                params={
+                    "page": page_number,
+                    "pageSize": 200,
+                    "expiryFrom": start_ms,
+                    "expiryTo": end_ms,
+                    "sort": "email",
+                },
+            )
+            try:
+                page = ClientPage.from_payload(payload)
+            except ValueError as exc:
+                raise PanelApiError(str(exc)) from exc
+            clients.extend(page.items)
+            if not page.items or page_number * page.page_size >= page.filtered:
+                return clients
+            page_number += 1
 
     async def get_client_payload(self, email: str) -> dict[str, Any]:
         payload = await self._request("GET", f"clients/get/{quote(email, safe='')}")

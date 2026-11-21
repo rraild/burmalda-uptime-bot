@@ -14,6 +14,7 @@ from vpn_monitor.handlers import build_router
 from vpn_monitor.monitor import MonitorService
 from vpn_monitor.panel_api import PanelApiClient
 from vpn_monitor.probes import ServerChecker
+from vpn_monitor.reminders import ExpiryReminders
 from vpn_monitor.state import MonitorState
 from vpn_monitor.subscriptions import SubscriptionService
 
@@ -79,9 +80,20 @@ async def main() -> None:
         cleanup_task = asyncio.create_task(
             subscriptions.run_cleanup(), name="subscription-cleanup"
         )
+        reminder_task = None
 
         try:
             await bot.delete_webhook(drop_pending_updates=False)
+            if settings.admin_ids:
+                reminders = ExpiryReminders(
+                    bot,
+                    panel_api,
+                    settings.admin_ids,
+                    Path(settings.state_dir) / "expiry-reminders.sqlite3",
+                )
+                reminder_task = asyncio.create_task(
+                    reminders.run(), name="expiry-reminders"
+                )
             if ready.parent.is_dir():
                 ready.touch()
             await dispatcher.start_polling(
@@ -96,6 +108,10 @@ async def main() -> None:
             cleanup_task.cancel()
             with suppress(asyncio.CancelledError):
                 await cleanup_task
+            if reminder_task is not None:
+                reminder_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await reminder_task
             await monitor_task
             await bot.session.close()
 
