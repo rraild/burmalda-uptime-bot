@@ -20,6 +20,7 @@ def main_keyboard() -> InlineKeyboardMarkup:
                 )
             ],
             [InlineKeyboardButton(text="➕ Создать подписку", callback_data="adm:new")],
+            [InlineKeyboardButton(text="💰 Финансы", callback_data="adm:fin")],
             [
                 InlineKeyboardButton(
                     text="🔄 Обновить статистику", callback_data="adm:menu"
@@ -168,6 +169,17 @@ def client_keyboard(
     rows.append(
         [
             InlineKeyboardButton(
+                text="💳 Записать оплату",
+                callback_data=f"adm:pay:{token}:{mode}:{page}",
+            ),
+            InlineKeyboardButton(
+                text="🧾 Оплаты клиента", callback_data=f"adm:ph:{token}:{mode}:{page}"
+            ),
+        ]
+    )
+    rows.append(
+        [
+            InlineKeyboardButton(
                 text="🔄 Обновить",
                 callback_data=f"adm:c:{token}:{mode}:{page}",
             ),
@@ -203,6 +215,11 @@ def expiry_keyboard(*, token: str, mode: str, page: int) -> InlineKeyboardMarkup
             ],
             [
                 InlineKeyboardButton(
+                    text="💳 Записать оплату", callback_data=f"adm:pay:{context}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
                     text="↩️ К пользователю",
                     callback_data=f"adm:c:{context}",
                 )
@@ -233,12 +250,14 @@ def confirm_unlimited_keyboard(
     )
 
 
-def cancel_input_keyboard(*, token: str, mode: str, page: int) -> InlineKeyboardMarkup:
+def cancel_input_keyboard(
+    *, token: str, mode: str, page: int, text: str = "Отмена"
+) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="Отмена",
+                    text=text,
                     callback_data=f"adm:c:{token}:{mode}:{page}",
                 )
             ]
@@ -295,11 +314,13 @@ def device_keyboard(
     )
 
 
-def confirm_keyboard(text: str, *, confirm: str, cancel: str) -> InlineKeyboardMarkup:
+def confirm_keyboard(
+    text: str, *, confirm: str, cancel: str, cancel_text: str = "Отмена"
+) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text=text, callback_data=confirm)],
-            [InlineKeyboardButton(text="Отмена", callback_data=cancel)],
+            [InlineKeyboardButton(text=cancel_text, callback_data=cancel)],
         ]
     )
 

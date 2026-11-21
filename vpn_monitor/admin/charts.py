@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from io import BytesIO
 
 from matplotlib.backends.backend_agg import FigureCanvasAgg
+from matplotlib.axes import Axes
 from matplotlib.dates import DateFormatter
 from matplotlib.figure import Figure
 
@@ -14,10 +15,7 @@ def render_node_chart(
     cpu: tuple[HistorySample, ...],
     memory: tuple[HistorySample, ...],
 ) -> bytes:
-    figure = Figure(figsize=(10, 5.6), dpi=130, facecolor="#101827")
-    FigureCanvasAgg(figure)
-    axis = figure.subplots()
-    axis.set_facecolor("#101827")
+    figure, axis = make_chart()
 
     if cpu:
         axis.plot(
@@ -40,10 +38,7 @@ def render_node_chart(
     axis.set_ylabel("Использование, %", color="#cbd5e1")
     axis.set_ylim(0, 100)
     axis.grid(color="#334155", alpha=0.55, linewidth=0.7)
-    axis.tick_params(colors="#cbd5e1")
     axis.xaxis.set_major_formatter(DateFormatter("%H:%M", tz=MSK))
-    for spine in axis.spines.values():
-        spine.set_color("#475569")
     if cpu or memory:
         legend = axis.legend(facecolor="#1e293b", edgecolor="#475569")
         for text in legend.get_texts():
@@ -60,6 +55,21 @@ def render_node_chart(
             fontsize=16,
         )
     figure.autofmt_xdate()
+    return chart_png(figure)
+
+
+def make_chart() -> tuple[Figure, Axes]:
+    figure = Figure(figsize=(10, 5.6), dpi=130, facecolor="#101827")
+    FigureCanvasAgg(figure)
+    axis = figure.subplots()
+    axis.set_facecolor("#101827")
+    axis.tick_params(colors="#cbd5e1")
+    for spine in axis.spines.values():
+        spine.set_color("#475569")
+    return figure, axis
+
+
+def chart_png(figure: Figure) -> bytes:
     figure.tight_layout()
     output = BytesIO()
     figure.savefig(output, format="png", facecolor=figure.get_facecolor())

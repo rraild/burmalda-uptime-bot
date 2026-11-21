@@ -1,7 +1,8 @@
 import asyncio
 import logging
+import sqlite3
 from collections.abc import Callable
-from datetime import datetime
+from datetime import date, datetime
 from html import escape
 
 from aiogram import F, Router
@@ -20,9 +21,11 @@ from aiogram.types import (
 from vpn_monitor.panel_api import PanelApiClient, PanelApiError
 from vpn_monitor.panel_models import ClientDetails, HwidDevice, TrafficStats
 from vpn_monitor.formatting import MSK
+from vpn_monitor.payments import PaymentLedger, month_start, parse_payment
 from vpn_monitor.subscriptions import Subscription, SubscriptionService, new_identity
 
 from .charts import render_node_chart
+from .finances import finance_keyboard, render_revenue_chart, report_text, rubles
 from .inputs import parse_day_delta, parse_expiry_date, parse_traffic_limit
 from .keyboards import (
     cancel_input_keyboard,
@@ -63,11 +66,13 @@ class AdminSearch(StatesGroup):
     waiting_for_expiry_days = State()
     waiting_for_new_expiry = State()
     waiting_for_new_comment = State()
+    waiting_for_payment = State()
 
 
 def build_admin_router(
     api: PanelApiClient,
     subscriptions: SubscriptionService,
+    ledger: PaymentLedger,
     *,
     admin_ids: frozenset[int],
     page_size: int,
@@ -77,6 +82,40 @@ def build_admin_router(
 
     def is_admin(user_id: int | None) -> bool:
         return user_id is not None and user_id in admin_ids
+
+    @router.message(AdminSearch.waiting_for_payment, ~F.text.startswith("/"))
+    async def payment_input(message: Message, state: FSMContext) -> None:
+        if not _is_private_admin_message(message, is_admin):
+            return
+        try:
+            amount = parse_payment(message.text or "")
+            token, mode, page, email = await _state_client_context(state, sessions)
+        except ValueError as exc:
+            await message.answer(str(exc))
+            return
+        try:
+            ledger.record(
+                email,
+                amount,
+                message.date,
+                admin_id=message.chat.id,
+                message_id=message.message_id,
+            )
+        except sqlite3.Error:
+            logger.exception("Payment record failed")
+            await message.answer("Не удалось сохранить оплату. Повторите ввод суммы.")
+            return
+        await state.clear()
+        await message.answer(
+            f"✅ Оплата записана.\n{escape(email)} · <b>{rubles(amount)}</b>",
+            parse_mode="HTML",
+            reply_markup=confirm_keyboard(
+                "🧾 Оплаты клиента",
+                confirm=f"adm:ph:{token}:{mode}:{page}",
+                cancel=f"adm:c:{token}:{mode}:{page}",
+                cancel_text="↩️ К клиенту",
+            ),
+        )
 
     @router.message(Command("admin"))
     async def admin_command(message: Message, state: FSMContext) -> None:
@@ -317,10 +356,14 @@ def build_admin_router(
                 state,
                 api,
                 subscriptions,
+                ledger,
                 sessions,
                 page_size,
                 data,
             )
+        except sqlite3.Error:
+            logger.exception("Finance database request failed")
+            await callback.message.answer("⚠️ Не удалось прочитать журнал оплат.")
         except (PanelApiError, ValueError) as exc:
             logger.warning("Admin panel request failed: %s", exc)
             await callback.message.answer(
@@ -335,12 +378,50 @@ async def _dispatch_callback(
     state: FSMContext,
     api: PanelApiClient,
     subscriptions: SubscriptionService,
+    ledger: PaymentLedger,
     sessions: AdminSessions,
     page_size: int,
     data: str,
 ) -> None:
     message = callback.message
     if message is None or data == "adm:noop":
+        return
+    if data == "adm:fin" or data.startswith(("adm:fin:", "adm:fchart:")):
+        await state.clear()
+        await _show_finances(message, ledger, data)
+        return
+    if data.startswith(("adm:pay:", "adm:ph:")):
+        action = data.split(":", 2)[1]
+        token, mode, page = _parse_context(data, f"adm:{action}:")
+        email = _resolve_email(sessions, token)
+        keyboard = cancel_input_keyboard(token=token, mode=mode, page=page)
+        await state.clear()
+        if action == "pay":
+            await _edit(
+                message,
+                f"<b>Оплата за {escape(email)}</b>\n\n"
+                "Введите полученную сумму в рублях. Например, <code>499,90</code>.",
+                keyboard,
+            )
+            await _set_client_state(
+                state,
+                AdminSearch.waiting_for_payment,
+                token=token,
+                mode=mode,
+                page=page,
+            )
+        else:
+            await _edit(
+                message,
+                report_text(
+                    f"Оплаты · {escape(email)}",
+                    ledger.report(email=email),
+                    monthly=False,
+                ),
+                cancel_input_keyboard(
+                    token=token, mode=mode, page=page, text="↩️ К клиенту"
+                ),
+            )
         return
     if data == "adm:new":
         await state.clear()
@@ -603,6 +684,36 @@ async def _dispatch_callback(
             device_text(device),
             device_keyboard(token=token, mode=mode, page=page, device_id=device_id),
         )
+
+
+async def _show_finances(message: Message, ledger: PaymentLedger, data: str) -> None:
+    current = month_start(datetime.now(MSK))
+    month = current
+    if data != "adm:fin":
+        selected = data.split(":")[2]
+        if len(selected) != 6 or not selected.isascii() or not selected.isdecimal():
+            raise ValueError("invalid finance month")
+        month = date(int(selected[:4]), int(selected[4:]), 1)
+        if not date(2000, 1, 1) <= month <= current:
+            raise ValueError("invalid finance month")
+    if data.startswith("adm:fchart:"):
+        totals = ledger.monthly_totals(month)
+        image = await asyncio.to_thread(render_revenue_chart, totals)
+        await message.answer_photo(
+            BufferedInputFile(image, filename="revenue.png"),
+            caption=(
+                f"Выручка за {totals[0][0]:%m.%Y} — {month:%m.%Y}: "
+                f"{rubles(sum(amount for _, amount in totals))}"
+            ),
+        )
+        return
+    await _edit(
+        message,
+        report_text(
+            f"Финансы · {month:%m.%Y} МСК", ledger.report(month=month), monthly=True
+        ),
+        finance_keyboard(month, current),
+    )
 
 
 async def _edit(

@@ -13,6 +13,7 @@ from vpn_monitor.config import Settings
 from vpn_monitor.handlers import build_router
 from vpn_monitor.monitor import MonitorService
 from vpn_monitor.panel_api import PanelApiClient
+from vpn_monitor.payments import PaymentLedger
 from vpn_monitor.probes import ServerChecker
 from vpn_monitor.reminders import ExpiryReminders
 from vpn_monitor.state import MonitorState
@@ -55,6 +56,7 @@ async def main() -> None:
             build_admin_router(
                 panel_api,
                 subscriptions,
+                PaymentLedger(Path(settings.state_dir) / "payments.sqlite3"),
                 admin_ids=settings.admin_ids,
                 page_size=settings.admin_page_size,
             )
