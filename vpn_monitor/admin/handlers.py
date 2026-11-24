@@ -490,9 +490,10 @@ async def _dispatch_callback(
         photo = BufferedInputFile(chart, filename="uptime.png")
         caption = (
             "🟢 Доступно   🟡 Недоступно из РФ   🔴 Офлайн\n"
-            "◻️ Нет подтверждённого статуса\n"
+            "Тёмно-зелёный — онлайн по панели, доступ из РФ не подтверждён.\n"
+            "Серый — нет данных о состоянии.\n"
             f"Одна полоска — {period.bucket_label}. "
-            "Цвет — худший подтверждённый статус за интервал."
+            "Сбои имеют приоритет над статусом «онлайн»."
         )
         await _show_chart(
             message, photo, caption, chart_period_keyboard("uptime", target, period_key)

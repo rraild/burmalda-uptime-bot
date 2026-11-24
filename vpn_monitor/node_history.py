@@ -9,11 +9,15 @@ from .models import Server, ServerStatus
 UPTIME_DAYS = 30
 SECONDS_PER_DAY = 86400
 STATE_RANK = {
+    ServerStatus.ONLINE_UNCHECKED: -1,
     ServerStatus.ONLINE: 1,
     ServerStatus.BLOCKED_RU: 2,
     ServerStatus.OFFLINE: 3,
 }
-STATE_BY_RANK = {rank: state for state, rank in STATE_RANK.items()}
+STATE_BY_PRIORITY = {
+    1: ServerStatus.ONLINE_UNCHECKED,
+    **{rank * 2: state for state, rank in STATE_RANK.items() if rank > 0},
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,16 +113,23 @@ class NodeHistory:
         end = int(now.timestamp())
         start = end - period.duration
         with closing(sqlite3.connect(self._path)) as db:
+            # Older rows stored unchecked probes as 0, but only online nodes
+            # recorded an online count. Keep the stored ranks compatible.
             rows = db.execute(
                 """SELECT node_id,
-                          MIN((sampled_at - ?) / ?, ?) AS bucket, MAX(status_rank)
+                          MIN((sampled_at - ?) / ?, ?) AS bucket,
+                          MAX(CASE
+                              WHEN status_rank = -1 THEN 1
+                              WHEN status_rank = 0 AND online_count IS NOT NULL THEN 1
+                              ELSE status_rank * 2
+                          END)
                    FROM samples WHERE sampled_at BETWEEN ? AND ?
                    GROUP BY node_id, bucket""",
                 (start, period.bucket_seconds, period.buckets - 1, start, end),
             ).fetchall()
         result: dict[int, list[ServerStatus | None]] = {}
-        for node_id, bucket, rank in rows:
+        for node_id, bucket, priority in rows:
             if node_id not in result:
                 result[node_id] = [None] * period.buckets
-            result[node_id][bucket] = STATE_BY_RANK.get(rank)
+            result[node_id][bucket] = STATE_BY_PRIORITY.get(priority)
         return result

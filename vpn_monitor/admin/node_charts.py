@@ -8,6 +8,7 @@ from .charts import chart_png, make_chart
 
 UPTIME_COLORS = {
     ServerStatus.ONLINE: "#4ade80",
+    ServerStatus.ONLINE_UNCHECKED: "#17694a",
     ServerStatus.BLOCKED_RU: "#facc15",
     ServerStatus.OFFLINE: "#fb7185",
     None: "#475569",

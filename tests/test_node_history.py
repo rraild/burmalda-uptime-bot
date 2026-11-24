@@ -1,4 +1,6 @@
+import sqlite3
 import unittest
+from contextlib import closing
 from datetime import datetime, timedelta
 from math import isnan
 from pathlib import Path
@@ -51,7 +53,8 @@ class HistoryTests(unittest.TestCase):
             self.assertEqual(statuses[20], ServerStatus.ONLINE)
             self.assertEqual(statuses[24], ServerStatus.BLOCKED_RU)
             self.assertEqual(statuses[26], ServerStatus.OFFLINE)
-            self.assertIsNone(statuses[-2])
+            self.assertEqual(statuses[-2], ServerStatus.ONLINE_UNCHECKED)
+            self.assertIsNone(statuses[-1])
             self.assertEqual(
                 history.uptime(now, UPTIME_PERIODS["30d"])[1][-1], ServerStatus.OFFLINE
             )
@@ -65,6 +68,27 @@ class HistoryTests(unittest.TestCase):
         self.assertTrue(
             render_uptime_chart([("Node", statuses)], now, hour).startswith(b"\x89PNG")
         )
+
+    def test_legacy_online_without_ru_verdict_is_visible(self) -> None:
+        now = datetime(2026, 11, 24, 12, tzinfo=MSK)
+        end = int(now.timestamp())
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "history.sqlite3"
+            history = NodeHistory(path)
+            with closing(sqlite3.connect(path)) as db, db:
+                db.executemany(
+                    "INSERT INTO samples VALUES (?, ?, ?, ?)",
+                    [
+                        (end - 180, 1, 0, 0),  # Online by panel, no RU verdict.
+                        (end - 160, 1, 0, None),  # No observation that cycle.
+                        (end - 60, 1, 0, 4),
+                        (end - 30, 1, 1, 6),  # Confirmed online takes priority.
+                    ],
+                )
+            self.assertEqual(
+                history.uptime(now, UPTIME_PERIODS["1h"])[1][-3:],
+                [None, ServerStatus.ONLINE_UNCHECKED, ServerStatus.ONLINE],
+            )
 
     def test_period_buttons_preserve_selected_node(self) -> None:
         self.assertEqual(_chart_selection("adm:uptime"), ("30d", "all"))
