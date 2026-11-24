@@ -1,9 +1,9 @@
 import sqlite3
 from contextlib import closing
-from datetime import datetime, time, timedelta
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
-from .formatting import MSK
 from .models import Server, ServerStatus
 
 UPTIME_DAYS = 30
@@ -14,6 +14,27 @@ STATE_RANK = {
     ServerStatus.OFFLINE: 3,
 }
 STATE_BY_RANK = {rank: state for state, rank in STATE_RANK.items()}
+
+
+@dataclass(frozen=True, slots=True)
+class UptimePeriod:
+    label: str
+    bucket_seconds: int
+    buckets: int
+    bucket_label: str
+    tick_format: str
+
+    @property
+    def duration(self) -> int:
+        return self.bucket_seconds * self.buckets
+
+
+UPTIME_PERIODS = {
+    "1h": UptimePeriod("1 час", 120, 30, "2 минуты", "%H:%M"),
+    "24h": UptimePeriod("24 часа", 3600, 24, "1 час", "%H:%M"),
+    "7d": UptimePeriod("7 дней", SECONDS_PER_DAY, 7, "24 часа", "%d.%m"),
+    "30d": UptimePeriod("30 дней", SECONDS_PER_DAY, UPTIME_DAYS, "24 часа", "%d.%m"),
+}
 
 
 class NodeHistory:
@@ -67,19 +88,22 @@ class NodeHistory:
                 (node_id, end - SECONDS_PER_DAY, end),
             ).fetchall()
 
-    def uptime(self, now: datetime) -> dict[int, list[ServerStatus | None]]:
-        first_day = now.astimezone(MSK).date() - timedelta(days=UPTIME_DAYS - 1)
-        start = int(datetime.combine(first_day, time.min, MSK).timestamp())
+    def uptime(
+        self, now: datetime, period: UptimePeriod
+    ) -> dict[int, list[ServerStatus | None]]:
+        end = int(now.timestamp())
+        start = end - period.duration
         with closing(sqlite3.connect(self._path)) as db:
             rows = db.execute(
-                """SELECT node_id, (sampled_at - ?) / 86400 AS day, MAX(status_rank)
+                """SELECT node_id,
+                          MIN((sampled_at - ?) / ?, ?) AS bucket, MAX(status_rank)
                    FROM samples WHERE sampled_at BETWEEN ? AND ?
-                   GROUP BY node_id, day""",
-                (start, start, int(now.timestamp())),
+                   GROUP BY node_id, bucket""",
+                (start, period.bucket_seconds, period.buckets - 1, start, end),
             ).fetchall()
         result: dict[int, list[ServerStatus | None]] = {}
-        for node_id, day, rank in rows:
+        for node_id, bucket, rank in rows:
             if node_id not in result:
-                result[node_id] = [None] * UPTIME_DAYS
-            result[node_id][day] = STATE_BY_RANK.get(rank)
+                result[node_id] = [None] * period.buckets
+            result[node_id][bucket] = STATE_BY_RANK.get(rank)
         return result

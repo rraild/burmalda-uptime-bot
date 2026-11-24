@@ -15,13 +15,14 @@ from aiogram.types import (
     BufferedInputFile,
     CallbackQuery,
     InlineKeyboardMarkup,
+    InputMediaPhoto,
     Message,
 )
 
 from vpn_monitor.panel_api import PanelApiClient, PanelApiError
 from vpn_monitor.panel_models import ClientDetails, HwidDevice, TrafficStats
 from vpn_monitor.formatting import MSK
-from vpn_monitor.node_history import UPTIME_DAYS, NodeHistory
+from vpn_monitor.node_history import UPTIME_PERIODS, NodeHistory
 from vpn_monitor.payments import PaymentLedger, month_start, parse_payment
 from vpn_monitor.subscriptions import Subscription, SubscriptionService, new_identity
 
@@ -42,6 +43,7 @@ from .keyboards import (
     node_keyboard,
     nodes_keyboard,
     subscription_keyboard,
+    uptime_keyboard,
     users_keyboard,
 )
 from .sessions import AdminSessions
@@ -462,28 +464,40 @@ async def _dispatch_callback(
         )
         return
     if data == "adm:uptime" or data.startswith("adm:uptime:"):
+        period_key, target = _uptime_selection(data)
+        period = UPTIME_PERIODS[period_key]
         now = datetime.now(MSK)
-        history = await asyncio.to_thread(node_history.uptime, now)
-        if data == "adm:uptime":
+        history = await asyncio.to_thread(node_history.uptime, now, period)
+        if target == "all":
             nodes = tuple(node for node in await api.get_nodes() if node.enabled)
         else:
-            node_id = _positive_int(data.removeprefix("adm:uptime:"))
-            nodes = (await api.get_node(node_id),)
+            nodes = (await api.get_node(_positive_int(target)),)
         if not nodes:
             await message.answer("Нет включённых локаций для графика.")
             return
         locations = [
-            (node.name, history.get(node.id, [None] * UPTIME_DAYS)) for node in nodes
+            (node.name, history.get(node.id, [None] * period.buckets)) for node in nodes
         ]
-        chart = await asyncio.to_thread(render_uptime_chart, locations, now)
-        await message.answer_photo(
-            BufferedInputFile(chart, filename="uptime.png"),
-            caption=(
-                "🟢 Доступно   🟡 Недоступно из РФ   🔴 Офлайн\n"
-                "◻️ Нет подтверждённого статуса\n"
-                "Цвет дня — худший подтверждённый статус за сутки по МСК."
-            ),
+        chart = await asyncio.to_thread(render_uptime_chart, locations, now, period)
+        photo = BufferedInputFile(chart, filename="uptime.png")
+        caption = (
+            "🟢 Доступно   🟡 Недоступно из РФ   🔴 Офлайн\n"
+            "◻️ Нет подтверждённого статуса\n"
+            f"Одна полоска — {period.bucket_label} (МСК). "
+            "Цвет — худший подтверждённый статус за интервал."
         )
+        keyboard = uptime_keyboard(target, period_key)
+        if message.photo:
+            try:
+                await message.edit_media(
+                    InputMediaPhoto(media=photo, caption=caption),
+                    reply_markup=keyboard,
+                )
+            except TelegramBadRequest as exc:
+                if "message is not modified" not in str(exc).lower():
+                    raise
+        else:
+            await message.answer_photo(photo, caption=caption, reply_markup=keyboard)
         return
     if data.startswith("adm:n:"):
         node_id = _positive_int(data.removeprefix("adm:n:"))
@@ -788,6 +802,18 @@ async def _message_refresh_error(message: Message, error: PanelApiError) -> None
         "✅ Изменение отправлено в 3x-ui, но обновить карточку не удалось. "
         "Откройте пользователя заново."
     )
+
+
+def _uptime_selection(data: str) -> tuple[str, str]:
+    parts = data.split(":")
+    if len(parts) == 2:
+        return "30d", "all"
+    if len(parts) == 3:
+        return "30d", str(_positive_int(parts[2]))
+    if len(parts) == 4 and parts[2] in UPTIME_PERIODS:
+        target = parts[3] if parts[3] == "all" else str(_positive_int(parts[3]))
+        return parts[2], target
+    raise ValueError("invalid uptime callback")
 
 
 def _positive_int(value: str) -> int:
