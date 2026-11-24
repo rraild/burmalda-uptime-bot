@@ -85,6 +85,12 @@ class NodesClient:
             return None
         status = str(item.get("status") or "unknown").strip().lower()
         online = item.get("onlineCount")
+        base_path = item.get("basePath")
+        if isinstance(base_path, str) and base_path.strip():
+            path = base_path.strip().strip("/")
+            panel_path = f"/{path}/" if path else "/"
+        else:
+            panel_path = parsed.path or "/"
         return Server(
             name=name,
             host=host,
@@ -92,6 +98,7 @@ class NodesClient:
             node_id=node_id,
             panel_status=status,
             scheme=parsed.scheme,
+            panel_path=quote(panel_path, safe="/%:@!$&'()*+,;=-._~"),
             online_count=(
                 online
                 if status == "online" and type(online) is int and online >= 0
@@ -161,7 +168,8 @@ class CheckHostClient:
             await asyncio.sleep(self._result_delay_seconds)
             results = await self._get(f"check-result/{quote(str(request_id), safe='')}")
         except (aiohttp.ClientError, TimeoutError, ValueError) as exc:
-            logger.warning("check-host request failed: %s", exc)
+            # aiohttp exception messages can include the full panel URL.
+            logger.warning("check-host request failed (%s)", type(exc).__name__)
             return None
 
         if not isinstance(results, dict):

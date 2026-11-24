@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import AsyncMock
 
 from vpn_monitor.clients import CheckHostClient, NodesClient
 from vpn_monitor.models import Server, ServerStatus
@@ -25,6 +26,26 @@ class SequenceChecker(ServerChecker):
 
 
 class ConfirmationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_check_host_receives_full_panel_url(self) -> None:
+        check_host = AsyncMock(spec=CheckHostClient)
+        check_host.is_available_from_ru.return_value = True
+        checker = ServerChecker(
+            check_host, confirmation_delay_seconds=0, max_concurrent_checks=1
+        )
+        node = NodesClient._parse_server(
+            {
+                "address": "node.example",
+                "scheme": "https",
+                "port": 35842,
+                "basePath": "private/panel",
+                "status": "online",
+            }
+        )
+        self.assertEqual(await checker.check_confirmed(node), ServerStatus.ONLINE)
+        check_host.is_available_from_ru.assert_awaited_once_with(
+            "https://node.example:35842/private/panel/"
+        )
+
     async def test_transient_failure_is_suppressed(self) -> None:
         checker = SequenceChecker([ServerStatus.BLOCKED_RU, ServerStatus.ONLINE])
         result = await checker.check_confirmed(Server("A", "a.example", 443))
@@ -71,6 +92,12 @@ class CheckHostParsingTests(unittest.TestCase):
         self.assertEqual(node.key, "node:7")
         self.assertEqual(node.panel_status, "online")
         self.assertEqual(node.probe_url, "http://node.example:8080/")
+
+    def test_node_can_use_url_path_without_base_path(self) -> None:
+        node = NodesClient._parse_server(
+            {"url": "https://[2001:db8::1]:9443/prefix/?unused=1"}
+        )
+        self.assertEqual(node.probe_url, "https://[2001:db8::1]:9443/prefix/")
 
 
 class StateTests(unittest.IsolatedAsyncioTestCase):

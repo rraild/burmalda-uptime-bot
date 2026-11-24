@@ -19,6 +19,7 @@ class Server:
     panel_status: str = "unknown"
     scheme: str = "https"
     online_count: int | None = None
+    panel_path: str = "/"
 
     @property
     def key(self) -> str:
@@ -29,7 +30,7 @@ class Server:
     @property
     def probe_url(self) -> str:
         host = f"[{self.host}]" if ":" in self.host else self.host
-        return f"{self.scheme}://{host}:{self.port}/"
+        return f"{self.scheme}://{host}:{self.port}{self.panel_path}"
 
 
 @dataclass(frozen=True, slots=True)
