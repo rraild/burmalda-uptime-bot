@@ -83,13 +83,20 @@ class NodesClient:
             return None
         if parsed.scheme not in {"http", "https"} or not host or not 1 <= port <= 65535:
             return None
+        status = str(item.get("status") or "unknown").strip().lower()
+        online = item.get("onlineCount")
         return Server(
             name=name,
             host=host,
             port=port,
             node_id=node_id,
-            panel_status=str(item.get("status") or "unknown").strip().lower(),
+            panel_status=status,
             scheme=parsed.scheme,
+            online_count=(
+                online
+                if status == "online" and type(online) is int and online >= 0
+                else None
+            ),
         )
 
 

@@ -12,6 +12,7 @@ from vpn_monitor.clients import CheckHostClient, NodesClient
 from vpn_monitor.config import Settings
 from vpn_monitor.handlers import build_router
 from vpn_monitor.monitor import MonitorService
+from vpn_monitor.node_history import NodeHistory
 from vpn_monitor.panel_api import PanelApiClient
 from vpn_monitor.payments import PaymentLedger
 from vpn_monitor.probes import ServerChecker
@@ -52,11 +53,13 @@ async def main() -> None:
         subscriptions = SubscriptionService(
             panel_api, Path(settings.state_dir) / "subscriptions.sqlite3"
         )
+        node_history = NodeHistory(Path(settings.state_dir) / "node-history.sqlite3")
         dispatcher.include_router(
             build_admin_router(
                 panel_api,
                 subscriptions,
                 PaymentLedger(Path(settings.state_dir) / "payments.sqlite3"),
+                node_history,
                 admin_ids=settings.admin_ids,
                 page_size=settings.admin_page_size,
             )
@@ -77,7 +80,7 @@ async def main() -> None:
             confirmation_delay_seconds=settings.confirmation_delay_seconds,
             max_concurrent_checks=settings.max_concurrent_checks,
         )
-        monitor = MonitorService(bot, settings, nodes, checker, state)
+        monitor = MonitorService(bot, settings, nodes, checker, state, node_history)
         monitor_task = asyncio.create_task(monitor.run(), name="vpn-monitor")
         cleanup_task = asyncio.create_task(
             subscriptions.run_cleanup(), name="subscription-cleanup"

@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import sqlite3
+from time import time
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramAPIError
@@ -7,6 +9,7 @@ from aiogram.exceptions import TelegramAPIError
 from .clients import NodesApiError, NodesClient
 from .config import Settings
 from .formatting import alert, dashboard
+from .node_history import NodeHistory
 from .probes import ServerChecker
 from .state import MonitorState
 
@@ -21,12 +24,14 @@ class MonitorService:
         nodes: NodesClient,
         checker: ServerChecker,
         state: MonitorState,
+        history: NodeHistory,
     ) -> None:
         self._bot = bot
         self._settings = settings
         self._nodes = nodes
         self._checker = checker
         self._state = state
+        self._history = history
         self._stop = asyncio.Event()
 
     def stop(self) -> None:
@@ -58,7 +63,12 @@ class MonitorService:
             logger.warning("Nodes API returned an empty server list")
             return
 
+        sampled_at = int(time())
         statuses = await self._checker.check_many(servers)
+        try:
+            await asyncio.to_thread(self._history.record, sampled_at, servers, statuses)
+        except sqlite3.Error:
+            logger.exception("Cannot save node history")
         transitions = await self._state.apply(servers, statuses)
         snapshot = await self._state.snapshot()
 

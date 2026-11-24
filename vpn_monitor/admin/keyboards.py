@@ -23,6 +23,11 @@ def main_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="💰 Финансы", callback_data="adm:fin")],
             [
                 InlineKeyboardButton(
+                    text="📊 Аптайм локаций", callback_data="adm:uptime"
+                )
+            ],
+            [
+                InlineKeyboardButton(
                     text="🔄 Обновить статистику", callback_data="adm:menu"
                 )
             ],
@@ -44,6 +49,9 @@ def nodes_keyboard(nodes: tuple[NodeInfo, ...]) -> InlineKeyboardMarkup:
             callback_data=f"adm:n:{node.id}",
         )
     builder.adjust(2)
+    builder.row(
+        InlineKeyboardButton(text="📊 Аптайм локаций", callback_data="adm:uptime")
+    )
     back_button = InlineKeyboardButton(
         text="↩️ В админ-панель", callback_data="adm:menu"
     )
@@ -59,6 +67,14 @@ def node_keyboard(node_id: int) -> InlineKeyboardMarkup:
                     text="📈 График CPU / RAM",
                     callback_data=f"adm:g:{node_id}",
                 )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="👥 Онлайн за 24 часа", callback_data=f"adm:online:{node_id}"
+                ),
+                InlineKeyboardButton(
+                    text="📊 Аптайм", callback_data=f"adm:uptime:{node_id}"
+                ),
             ],
             [
                 InlineKeyboardButton(

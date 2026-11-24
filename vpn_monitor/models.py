@@ -18,6 +18,7 @@ class Server:
     node_id: int = 0
     panel_status: str = "unknown"
     scheme: str = "https"
+    online_count: int | None = None
 
     @property
     def key(self) -> str:

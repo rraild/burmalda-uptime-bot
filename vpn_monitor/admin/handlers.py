@@ -21,11 +21,13 @@ from aiogram.types import (
 from vpn_monitor.panel_api import PanelApiClient, PanelApiError
 from vpn_monitor.panel_models import ClientDetails, HwidDevice, TrafficStats
 from vpn_monitor.formatting import MSK
+from vpn_monitor.node_history import UPTIME_DAYS, NodeHistory
 from vpn_monitor.payments import PaymentLedger, month_start, parse_payment
 from vpn_monitor.subscriptions import Subscription, SubscriptionService, new_identity
 
 from .charts import render_node_chart
 from .finances import finance_keyboard, render_revenue_chart, report_text, rubles
+from .node_charts import render_online_chart, render_uptime_chart
 from .inputs import parse_day_delta, parse_expiry_date, parse_traffic_limit
 from .keyboards import (
     cancel_input_keyboard,
@@ -73,6 +75,7 @@ def build_admin_router(
     api: PanelApiClient,
     subscriptions: SubscriptionService,
     ledger: PaymentLedger,
+    node_history: NodeHistory,
     *,
     admin_ids: frozenset[int],
     page_size: int,
@@ -357,13 +360,14 @@ def build_admin_router(
                 api,
                 subscriptions,
                 ledger,
+                node_history,
                 sessions,
                 page_size,
                 data,
             )
         except sqlite3.Error:
-            logger.exception("Finance database request failed")
-            await callback.message.answer("⚠️ Не удалось прочитать журнал оплат.")
+            logger.exception("Admin database request failed")
+            await callback.message.answer("⚠️ Не удалось прочитать данные бота.")
         except (PanelApiError, ValueError) as exc:
             logger.warning("Admin panel request failed: %s", exc)
             await callback.message.answer(
@@ -379,6 +383,7 @@ async def _dispatch_callback(
     api: PanelApiClient,
     subscriptions: SubscriptionService,
     ledger: PaymentLedger,
+    node_history: NodeHistory,
     sessions: AdminSessions,
     page_size: int,
     data: str,
@@ -441,6 +446,44 @@ async def _dispatch_callback(
     if data == "adm:nodes":
         nodes = await api.get_nodes()
         await _edit(message, locations_text(nodes), nodes_keyboard(nodes))
+        return
+    if data.startswith("adm:online:"):
+        node_id = _positive_int(data.removeprefix("adm:online:"))
+        node = await api.get_node(node_id)
+        now = datetime.now(MSK)
+        samples = await asyncio.to_thread(node_history.connected, node_id, now)
+        chart = await asyncio.to_thread(render_online_chart, node.name, samples, now)
+        caption = "Онлайн за последние 24 часа · МСК"
+        if samples:
+            caption += f"\nПик по замерам: {max(count for _, count in samples)}"
+        await message.answer_photo(
+            BufferedInputFile(chart, filename=f"node-{node_id}-online.png"),
+            caption=caption,
+        )
+        return
+    if data == "adm:uptime" or data.startswith("adm:uptime:"):
+        now = datetime.now(MSK)
+        history = await asyncio.to_thread(node_history.uptime, now)
+        if data == "adm:uptime":
+            nodes = tuple(node for node in await api.get_nodes() if node.enabled)
+        else:
+            node_id = _positive_int(data.removeprefix("adm:uptime:"))
+            nodes = (await api.get_node(node_id),)
+        if not nodes:
+            await message.answer("Нет включённых локаций для графика.")
+            return
+        locations = [
+            (node.name, history.get(node.id, [None] * UPTIME_DAYS)) for node in nodes
+        ]
+        chart = await asyncio.to_thread(render_uptime_chart, locations, now)
+        await message.answer_photo(
+            BufferedInputFile(chart, filename="uptime.png"),
+            caption=(
+                "🟢 Доступно   🟡 Недоступно из РФ   🔴 Офлайн\n"
+                "◻️ Нет подтверждённого статуса\n"
+                "Цвет дня — худший подтверждённый статус за сутки по МСК."
+            ),
+        )
         return
     if data.startswith("adm:n:"):
         node_id = _positive_int(data.removeprefix("adm:n:"))
