@@ -22,7 +22,7 @@ from aiogram.types import (
 from vpn_monitor.panel_api import PanelApiClient, PanelApiError
 from vpn_monitor.panel_models import ClientDetails, HwidDevice, TrafficStats
 from vpn_monitor.formatting import MSK
-from vpn_monitor.node_history import UPTIME_PERIODS, NodeHistory
+from vpn_monitor.node_history import ONLINE_PERIODS, UPTIME_PERIODS, NodeHistory
 from vpn_monitor.payments import PaymentLedger, month_start, parse_payment
 from vpn_monitor.subscriptions import Subscription, SubscriptionService, new_identity
 
@@ -33,6 +33,7 @@ from .inputs import parse_day_delta, parse_expiry_date, parse_traffic_limit
 from .keyboards import (
     cancel_input_keyboard,
     cancel_search_keyboard,
+    chart_period_keyboard,
     client_keyboard,
     confirm_keyboard,
     confirm_unlimited_keyboard,
@@ -43,7 +44,6 @@ from .keyboards import (
     node_keyboard,
     nodes_keyboard,
     subscription_keyboard,
-    uptime_keyboard,
     users_keyboard,
 )
 from .sessions import AdminSessions
@@ -450,21 +450,29 @@ async def _dispatch_callback(
         await _edit(message, locations_text(nodes), nodes_keyboard(nodes))
         return
     if data.startswith("adm:online:"):
-        node_id = _positive_int(data.removeprefix("adm:online:"))
+        period_key, target = _chart_selection(data)
+        period = ONLINE_PERIODS[period_key]
+        node_id = _positive_int(target)
         node = await api.get_node(node_id)
         now = datetime.now(MSK)
-        samples = await asyncio.to_thread(node_history.connected, node_id, now)
-        chart = await asyncio.to_thread(render_online_chart, node.name, samples, now)
-        caption = "Онлайн за последние 24 часа · МСК"
-        if samples:
-            caption += f"\nПик по замерам: {max(count for _, count in samples)}"
-        await message.answer_photo(
+        points, peak = await asyncio.to_thread(
+            node_history.connected, node_id, now, period
+        )
+        chart = await asyncio.to_thread(
+            render_online_chart, node.name, points, now, period
+        )
+        caption = f"Онлайн за {period.label}. Шаг усреднения — {period.bucket_label}."
+        if peak is not None:
+            caption += f"\nПик по замерам: {peak}"
+        await _show_chart(
+            message,
             BufferedInputFile(chart, filename=f"node-{node_id}-online.png"),
-            caption=caption,
+            caption,
+            chart_period_keyboard("online", target, period_key),
         )
         return
     if data == "adm:uptime" or data.startswith("adm:uptime:"):
-        period_key, target = _uptime_selection(data)
+        period_key, target = _chart_selection(data)
         period = UPTIME_PERIODS[period_key]
         now = datetime.now(MSK)
         history = await asyncio.to_thread(node_history.uptime, now, period)
@@ -483,21 +491,12 @@ async def _dispatch_callback(
         caption = (
             "🟢 Доступно   🟡 Недоступно из РФ   🔴 Офлайн\n"
             "◻️ Нет подтверждённого статуса\n"
-            f"Одна полоска — {period.bucket_label} (МСК). "
+            f"Одна полоска — {period.bucket_label}. "
             "Цвет — худший подтверждённый статус за интервал."
         )
-        keyboard = uptime_keyboard(target, period_key)
-        if message.photo:
-            try:
-                await message.edit_media(
-                    InputMediaPhoto(media=photo, caption=caption),
-                    reply_markup=keyboard,
-                )
-            except TelegramBadRequest as exc:
-                if "message is not modified" not in str(exc).lower():
-                    raise
-        else:
-            await message.answer_photo(photo, caption=caption, reply_markup=keyboard)
+        await _show_chart(
+            message, photo, caption, chart_period_keyboard("uptime", target, period_key)
+        )
         return
     if data.startswith("adm:n:"):
         node_id = _positive_int(data.removeprefix("adm:n:"))
@@ -616,7 +615,7 @@ async def _dispatch_callback(
             f"<b>Новая дата окончания для {escape(email)}</b>\n\n"
             "Пришлите дату в формате <code>ДД.ММ.ГГ</code>, например "
             "<code>16.09.26</code>. Подписка будет действовать до конца "
-            "указанного дня по Москве.",
+            "указанного дня.",
             cancel_input_keyboard(token=token, mode=mode, page=page),
         )
         return
@@ -767,7 +766,7 @@ async def _show_finances(message: Message, ledger: PaymentLedger, data: str) -> 
     await _edit(
         message,
         report_text(
-            f"Финансы · {month:%m.%Y} МСК", ledger.report(month=month), monthly=True
+            f"Финансы · {month:%m.%Y}", ledger.report(month=month), monthly=True
         ),
         finance_keyboard(month, current),
     )
@@ -804,16 +803,36 @@ async def _message_refresh_error(message: Message, error: PanelApiError) -> None
     )
 
 
-def _uptime_selection(data: str) -> tuple[str, str]:
+async def _show_chart(
+    message: Message,
+    photo: BufferedInputFile,
+    caption: str,
+    keyboard: InlineKeyboardMarkup,
+) -> None:
+    if not message.photo:
+        await message.answer_photo(photo, caption=caption, reply_markup=keyboard)
+        return
+    try:
+        await message.edit_media(
+            InputMediaPhoto(media=photo, caption=caption), reply_markup=keyboard
+        )
+    except TelegramBadRequest as exc:
+        if "message is not modified" not in str(exc).lower():
+            raise
+
+
+def _chart_selection(data: str) -> tuple[str, str]:
     parts = data.split(":")
-    if len(parts) == 2:
+    uptime = parts[1] == "uptime"
+    periods = UPTIME_PERIODS if uptime else ONLINE_PERIODS
+    if len(parts) == 2 and uptime:
         return "30d", "all"
     if len(parts) == 3:
-        return "30d", str(_positive_int(parts[2]))
-    if len(parts) == 4 and parts[2] in UPTIME_PERIODS:
-        target = parts[3] if parts[3] == "all" else str(_positive_int(parts[3]))
+        return "30d" if uptime else "24h", str(_positive_int(parts[2]))
+    if len(parts) == 4 and parts[2] in periods:
+        target = "all" if uptime and parts[3] == "all" else str(_positive_int(parts[3]))
         return parts[2], target
-    raise ValueError("invalid uptime callback")
+    raise ValueError("invalid chart callback")
 
 
 def _positive_int(value: str) -> int:
@@ -898,7 +917,7 @@ def _subscription_result(
     expiry = "Бессрочно"
     if client.expiry_time > 0:
         expiry = datetime.fromtimestamp(client.expiry_time / 1000, MSK).strftime(
-            "%d.%m.%Y %H:%M МСК"
+            "%d.%m.%Y %H:%M"
         )
     elif client.expiry_time < 0:
         expiry = f"{-client.expiry_time // 86400000} д. с первого подключения"
@@ -914,7 +933,7 @@ def _subscription_result(
     ]
     if result.delete_after:
         deadline = datetime.fromtimestamp(result.delete_after, MSK)
-        lines.append(f"Удаление старой ссылки: {deadline:%d.%m.%Y %H:%M МСК}")
+        lines.append(f"Удаление старой ссылки: {deadline:%d.%m.%Y %H:%M}")
         if not result.traffic_copied:
             lines.append("Перенос счётчиков трафика не подтверждён.")
     if result.node_pending:

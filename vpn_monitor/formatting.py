@@ -42,7 +42,7 @@ def dashboard(snapshot: StateSnapshot, *, confirmation_delay: float) -> str:
     lines.extend(
         [
             "",
-            f"<i>Последнее обновление: {now_msk} (МСК)</i>",
+            f"<i>Последнее обновление: {now_msk}</i>",
             "<i>Проверка из РФ при сбое повторяется "
             f"через {confirmation_delay:g} сек.</i>",
         ]
@@ -92,7 +92,7 @@ def summary(snapshot: StateSnapshot) -> str:
                 )
             lines.append(
                 f"• {escape(incident.server_name)} — {label.lower()}, "
-                f"{started} МСК, {ending}"
+                f"{started}, {ending}"
             )
     return "\n".join(lines)
 

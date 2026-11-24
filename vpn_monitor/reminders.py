@@ -87,7 +87,7 @@ def reminder_text(client: ClientListItem, now_ms: int) -> str:
         "⏳ <b>Подписка скоро закончится</b>",
         f"Группа: {escape(GROUP)}",
         f"Email: <code>{escape(client.email)}</code>",
-        f"Срок: <b>{expiry:%d.%m.%Y %H:%M} МСК</b>",
+        f"Срок: <b>{expiry:%d.%m.%Y %H:%M}</b>",
         f"Осталось: {remaining}",
     ]
     if client.comment:

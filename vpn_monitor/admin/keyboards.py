@@ -70,7 +70,7 @@ def node_keyboard(node_id: int) -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(
-                    text="👥 Онлайн за 24 часа", callback_data=f"adm:online:{node_id}"
+                    text="👥 График онлайна", callback_data=f"adm:online:{node_id}"
                 ),
                 InlineKeyboardButton(
                     text="📊 Аптайм", callback_data=f"adm:uptime:{node_id}"
@@ -86,14 +86,14 @@ def node_keyboard(node_id: int) -> InlineKeyboardMarkup:
     )
 
 
-def uptime_keyboard(target: str, period: str) -> InlineKeyboardMarkup:
+def chart_period_keyboard(chart: str, target: str, period: str) -> InlineKeyboardMarkup:
     periods = (("1h", "1 час"), ("24h", "24 часа"), ("7d", "7 дней"), ("30d", "Месяц"))
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
                     text=f"✓ {label}" if key == period else label,
-                    callback_data=f"adm:uptime:{key}:{target}",
+                    callback_data=f"adm:{chart}:{key}:{target}",
                 )
                 for key, label in periods
             ]

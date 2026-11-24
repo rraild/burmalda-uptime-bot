@@ -34,5 +34,5 @@ class ExpiryReminderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(bot.send_message.await_count, 2)
         for call in bot.send_message.await_args_list:
             self.assertIn("<code>target</code>", call.args[1])
-            self.assertIn("МСК", call.args[1])
+            self.assertNotIn("МСК", call.args[1])
         api.get_expiring_clients.assert_awaited_with(now_ms, now_ms + DAY_MS)

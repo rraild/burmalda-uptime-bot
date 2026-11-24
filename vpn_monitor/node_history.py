@@ -36,6 +36,13 @@ UPTIME_PERIODS = {
     "30d": UptimePeriod("30 дней", SECONDS_PER_DAY, UPTIME_DAYS, "24 часа", "%d.%m"),
 }
 
+ONLINE_PERIODS = {
+    "1h": UptimePeriod("1 час", 300, 12, "5 минут", "%H:%M"),
+    "24h": UptimePeriod("24 часа", 1800, 48, "30 минут", "%H:%M"),
+    "7d": UptimePeriod("7 дней", 10800, 56, "3 часа", "%d.%m"),
+    "30d": UptimePeriod("30 дней", 43200, 60, "12 часов", "%d.%m"),
+}
+
 
 class NodeHistory:
     def __init__(self, path: Path) -> None:
@@ -78,15 +85,23 @@ class NodeHistory:
                 (sampled_at - UPTIME_DAYS * SECONDS_PER_DAY,),
             )
 
-    def connected(self, node_id: int, now: datetime) -> list[tuple[int, int]]:
+    def connected(
+        self, node_id: int, now: datetime, period: UptimePeriod
+    ) -> tuple[list[tuple[int, float]], int | None]:
         end = int(now.timestamp())
+        start = end - period.duration
+        step = period.bucket_seconds
         with closing(sqlite3.connect(self._path)) as db:
-            return db.execute(
-                """SELECT sampled_at, online_count FROM samples
+            rows = db.execute(
+                """SELECT MIN((sampled_at - ?) / ?, ?) AS bucket,
+                          AVG(online_count), MAX(online_count)
+                   FROM samples
                    WHERE node_id = ? AND sampled_at BETWEEN ? AND ?
-                   AND online_count IS NOT NULL ORDER BY sampled_at""",
-                (node_id, end - SECONDS_PER_DAY, end),
+                   AND online_count IS NOT NULL GROUP BY bucket ORDER BY bucket""",
+                (start, step, period.buckets - 1, node_id, start, end),
             ).fetchall()
+        points = [(start + bucket * step + step // 2, mean) for bucket, mean, _ in rows]
+        return points, max((peak for _, _, peak in rows), default=None)
 
     def uptime(
         self, now: datetime, period: UptimePeriod

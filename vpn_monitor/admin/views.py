@@ -130,7 +130,7 @@ def node_text(node: NodeInfo) -> str:
         "",
         f"Сеть ↑ {format_bytes(node.net_up)} · ↓ {format_bytes(node.net_down)}",
         f"Панель: {escape(node.panel_version)} · Xray: {escape(node.xray_version)}",
-        f"Последний heartbeat: {_timestamp(node.last_heartbeat)} МСК",
+        f"Последний heartbeat: {_timestamp(node.last_heartbeat)}",
     ]
     error = node.xray_error or node.last_error
     if error:
